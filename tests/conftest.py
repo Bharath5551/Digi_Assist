@@ -3,7 +3,7 @@ import os
 import pytest
 
 os.environ.setdefault("TOKEN_ENCRYPTION_KEY", "0" * 43 + "=")
-os.environ["ANTHROPIC_API_KEY"] = "test-key"
+os.environ["LLM_API_KEY"] = "test-key"
 
 
 @pytest.fixture(autouse=True)

@@ -11,9 +11,9 @@ def test_discover_loads_phase1_skills():
     # every tool definition is a valid strict schema
     for s in reg.all():
         for t in s.tools:
-            api = t.to_api()
-            assert api["strict"] and api["input_schema"]["additionalProperties"] is False
-            assert set(api["input_schema"]["required"]) == set(api["input_schema"]["properties"])
+            schema = t.to_schema()
+            assert schema["additionalProperties"] is False
+            assert set(schema["required"]) == set(schema["properties"])
 
 
 def test_irreversible_tools_are_gated():
@@ -25,7 +25,7 @@ def test_irreversible_tools_are_gated():
 async def test_router_loads_all_when_few_skills():
     reg = discover()
     assert len([s for s in reg.all() if not s.always_on]) <= LOAD_ALL_THRESHOLD
-    chosen = await route("anything", reg, client=None)
+    chosen = await route("anything", reg, provider=None)
     assert {s.name for s in chosen} == set(reg.names())
 
 

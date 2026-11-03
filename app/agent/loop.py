@@ -1,16 +1,15 @@
 """The agent loop: one user message in, one reply out, tools in between.
 
-Hand-written over the Messages API so the approval gate, persistence and
-audit log sit exactly where we want them.
+Provider-agnostic: the loop speaks canonical content blocks and the provider
+(NVIDIA Nemotron, OpenRouter, Claude, ...) converts. The approval gate,
+persistence and audit log sit here so they hold whatever model is behind it.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 
-import anthropic
 from sqlalchemy import select
 
 from app import approvals
@@ -22,64 +21,53 @@ from app.audit import record
 from app.config import get_settings
 from app.db.base import session
 from app.db.models import Conversation, Message
+from app.llm import get_provider
+from app.llm.base import Provider, Request, ToolSpec
 from app.skills.memory.store import snapshot as memory_snapshot
 
 log = logging.getLogger(__name__)
 
-FALLBACK_BETA = "server-side-fallback-2026-07-01"
-
 
 class Agent:
-    def __init__(self, registry: Registry, client: anthropic.AsyncAnthropic | None = None) -> None:
+    def __init__(self, registry: Registry, provider: Provider | None = None) -> None:
         self.registry = registry
-        self.client = client or anthropic.AsyncAnthropic()
+        self.provider = provider or get_provider()
         self.settings = get_settings()
 
     async def run_turn(self, text: str, *, channel: str = "telegram", notifier: Notifier | None = None) -> str:
-        skills = await route(text, self.registry, self.client)
+        skills = await route(text, self.registry, self.provider)
         conv_id, history = await self._load_history(channel)
-        system = build_system(skills, await memory_snapshot(), self.settings.timezone)
-        tools = [t.to_api() for s in skills for t in s.tools]
+        stable, volatile = build_system(skills, await memory_snapshot(), self.settings.timezone)
+        tools = [ToolSpec(t.name, t.description, t.to_schema()) for s in skills for t in s.tools]
 
         messages: list[dict[str, Any]] = history + [{"role": "user", "content": text}]
         await self._save(conv_id, "user", text)
 
         reply_parts: list[str] = []
         for _ in range(self.settings.max_tool_iterations):
-            response = await self.client.beta.messages.create(
-                model=self.settings.model,
-                max_tokens=16000,
-                system=system,
-                tools=tools,
-                messages=messages,
-                output_config={"effort": self.settings.effort},
-                betas=[FALLBACK_BETA],
-                fallbacks="default",
+            completion = await self.provider.complete(
+                Request(system_stable=stable, system_volatile=volatile, messages=messages, tools=tools, max_tokens=self.settings.max_tokens)
             )
-            content = [b.model_dump(mode="json", exclude_none=True) for b in response.content]
-            messages.append({"role": "assistant", "content": content})
-            await self._save(conv_id, "assistant", content)
-            reply_parts.extend(b.text for b in response.content if b.type == "text")
+            messages.append({"role": "assistant", "content": completion.content})
+            await self._save(conv_id, "assistant", completion.content)
+            if completion.text:
+                reply_parts.append(completion.text)
 
-            if response.stop_reason == "refusal":
+            if completion.stop_reason == "refusal":
                 reply_parts.append("I can't help with that one.")
                 break
-            if response.stop_reason == "max_tokens":
+            if completion.stop_reason == "max_tokens":
                 reply_parts.append("(cut off: response too long)")
                 break
-            if response.stop_reason == "pause_turn":
+            if completion.stop_reason == "pause_turn":
                 continue
-            if response.stop_reason != "tool_use":
+            if completion.stop_reason != "tool_use":
                 break
 
             results = []
-            for block in response.content:
-                if block.type != "tool_use":
-                    continue
-                result, is_error = await self._call_tool(block.name, dict(block.input), skills, notifier)
-                results.append(
-                    {"type": "tool_result", "tool_use_id": block.id, "content": result, "is_error": is_error}
-                )
+            for block in completion.tool_uses:
+                result, is_error = await self._call_tool(block["name"], dict(block.get("input") or {}), skills, notifier)
+                results.append({"type": "tool_result", "tool_use_id": block["id"], "content": result, "is_error": is_error})
             messages.append({"role": "user", "content": results})
             await self._save(conv_id, "user", results)
         else:
@@ -94,7 +82,12 @@ class Agent:
         found = self.registry.find_tool(name, skills)
         if not found:
             return f"Unknown tool {name}", True
+        if "__invalid_json__" in args:
+            return "Tool arguments were not valid JSON. Call the tool again with a valid JSON object.", True
         skill, tool = found
+        problem = tool.validate(args)
+        if problem:
+            return f"Invalid arguments: {problem}", True
         if tool.requires_approval:
             a = await approvals.queue(skill, tool, args, notifier)
             return (
@@ -142,7 +135,3 @@ def _trim_to_user_start(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if m["role"] == "user" and isinstance(m["content"], str):
             return history[i:]
     return []
-
-
-def pretty_args(args: dict[str, Any]) -> str:
-    return json.dumps(args, ensure_ascii=False)[:500]
