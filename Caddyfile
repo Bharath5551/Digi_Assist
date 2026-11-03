@@ -1,0 +1,13 @@
+# Replace with your domain. Caddy gets the HTTPS certificate itself.
+# Only /health and the OAuth callback are exposed; Telegram uses long polling, so no inbound webhook is needed.
+assistant.example.com {
+    handle /health {
+        reverse_proxy app:8000
+    }
+    handle /oauth/* {
+        reverse_proxy app:8000
+    }
+    handle {
+        respond "Not found" 404
+    }
+}
