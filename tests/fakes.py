@@ -1,55 +1,45 @@
-"""A fake Anthropic client that replays scripted responses, so the loop,
-approval gate and persistence can be tested without the network."""
+"""A fake provider that replays scripted completions, so the loop, approval
+gate and persistence can be tested without the network."""
 
 from __future__ import annotations
 
 import copy
-from types import SimpleNamespace
 from typing import Any
 
-
-class Block(SimpleNamespace):
-    def model_dump(self, mode: str = "json", exclude_none: bool = True) -> dict[str, Any]:
-        return {k: v for k, v in self.__dict__.items() if v is not None}
+from app.llm.base import Block, Completion, Request
 
 
 def text(t: str) -> Block:
-    return Block(type="text", text=t)
+    return {"type": "text", "text": t}
 
 
 def tool_use(name: str, input: dict[str, Any], id: str = "tu_1") -> Block:
-    return Block(type="tool_use", id=id, name=name, input=input)
+    return {"type": "tool_use", "id": id, "name": name, "input": input}
 
 
-class Response(SimpleNamespace):
-    pass
+def end_turn(*blocks: Block) -> Completion:
+    return Completion(content=list(blocks), stop_reason="end_turn")
 
 
-class FakeMessages:
-    def __init__(self, script: list[Response]) -> None:
+def wants_tool(*blocks: Block) -> Completion:
+    return Completion(content=list(blocks), stop_reason="tool_use")
+
+
+class FakeProvider:
+    name = "fake"
+
+    def __init__(self, script: list[Completion]) -> None:
         self.script = list(script)
-        self.calls: list[dict[str, Any]] = []
+        self.calls: list[Request] = []
 
-    async def create(self, **kwargs: Any) -> Response:
-        # the loop mutates its messages list after the call; snapshot it
-        self.calls.append({**kwargs, "messages": copy.deepcopy(kwargs.get("messages"))})
+    async def complete(self, req: Request) -> Completion:
+        self.calls.append(copy.deepcopy(req))  # the loop mutates its messages list afterwards
         if not self.script:
-            raise AssertionError("fake client ran out of scripted responses")
+            raise AssertionError("fake provider ran out of scripted completions")
         return self.script.pop(0)
 
-
-class FakeClient:
-    def __init__(self, script: list[Response]) -> None:
-        self.beta = SimpleNamespace(messages=FakeMessages(script))
-        self.messages = self.beta.messages
-
-
-def end_turn(*blocks: Block) -> Response:
-    return Response(content=list(blocks), stop_reason="end_turn")
-
-
-def wants_tool(*blocks: Block) -> Response:
-    return Response(content=list(blocks), stop_reason="tool_use")
+    async def quick(self, prompt: str, max_tokens: int = 256) -> str:
+        return ""
 
 
 class RecordingNotifier:

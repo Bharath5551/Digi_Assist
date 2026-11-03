@@ -19,11 +19,14 @@ Hard rules on actions:
 - Reading, searching, drafting, planning and reminders need no approval.
 - Never ask for passwords, OTPs or card numbers.
 
+Tool use: call tools with valid JSON arguments that match the schema exactly. Fill every required field. If no tool fits, say so in plain text instead of inventing one.
+
 Formatting: plain text, short lines, no markdown tables. Use a dash list only for several parallel items."""
 
 
-def build_system(skills: list[Skill], memory_snapshot: str, tz: str) -> list[dict]:
-    """Stable prefix first with a cache breakpoint, then volatile content."""
+def build_system(skills: list[Skill], memory_snapshot: str, tz: str) -> tuple[str, str]:
+    """(stable, volatile): the stable part is identical across turns so providers
+    that cache prefixes can; the volatile part carries time and memory."""
     parts = [BASE_SYSTEM]
     for s in skills:
         if s.instructions:
@@ -35,7 +38,4 @@ def build_system(skills: list[Skill], memory_snapshot: str, tz: str) -> list[dic
         f"Current time: {now.strftime('%A %d %B %Y, %H:%M')} ({tz}).\n\n"
         f"What you remember about him:\n{memory_snapshot or '(nothing saved yet)'}"
     )
-    return [
-        {"type": "text", "text": stable, "cache_control": {"type": "ephemeral"}},
-        {"type": "text", "text": volatile},
-    ]
+    return stable, volatile

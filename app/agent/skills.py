@@ -30,18 +30,36 @@ class Tool:
     # Human-readable one-liner shown on the approval card. Receives the tool args.
     summarize: Callable[[dict[str, Any]], str] | None = None
 
-    def to_api(self) -> dict[str, Any]:
+    def to_schema(self) -> dict[str, Any]:
         schema = dict(self.input_schema)
         schema.setdefault("type", "object")
         schema.setdefault("properties", {})
         schema.setdefault("additionalProperties", False)
         schema.setdefault("required", list(schema["properties"].keys()))
-        return {
-            "name": self.name,
-            "description": self.description,
-            "input_schema": schema,
-            "strict": True,
-        }
+        return schema
+
+    def validate(self, args: dict[str, Any]) -> str | None:
+        """Cheap argument check so a sloppy model gets a clear error instead of a
+        TypeError from the handler. Returns a problem description or None."""
+        schema = self.to_schema()
+        props = schema["properties"]
+        unknown = set(args) - set(props)
+        if unknown:
+            return f"unknown fields {sorted(unknown)}; allowed: {sorted(props)}"
+        missing = [k for k in schema["required"] if k not in args]
+        if missing:
+            return f"missing required fields {missing}"
+        for k, v in args.items():
+            want = props[k].get("type")
+            if want == "string" and not isinstance(v, str):
+                return f"{k} must be a string"
+            if want == "integer" and (isinstance(v, bool) or not isinstance(v, int)):
+                return f"{k} must be an integer"
+            if want == "array" and not isinstance(v, list):
+                return f"{k} must be an array"
+            if "enum" in props[k] and v not in props[k]["enum"]:
+                return f"{k} must be one of {props[k]['enum']}"
+        return None
 
     def summary(self, args: dict[str, Any]) -> str:
         if self.summarize:

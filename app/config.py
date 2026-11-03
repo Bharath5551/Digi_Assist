@@ -7,10 +7,15 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
-    anthropic_api_key: str = ""
-    model: str = "claude-opus-5-5"
-    router_model: str = "claude-haiku-5-5"
-    effort: str = "medium"
+    # Model provider: nvidia (free Nemotron via build.nvidia.com), openrouter,
+    # openai_compat (set LLM_BASE_URL), or anthropic.
+    llm_provider: str = "nvidia"
+    llm_api_key: str = ""
+    llm_base_url: str = ""
+    model: str = "nvidia/nemotron-3-super-120b-a12b"
+    router_model: str = ""  # empty = same as MODEL
+    effort: str = "medium"  # anthropic only
+    max_tokens: int = 4096
 
     telegram_bot_token: str = ""
     telegram_owner_id: int = 0
@@ -28,6 +33,13 @@ class Settings(BaseSettings):
 
     max_history_messages: int = 40
     max_tool_iterations: int = 12
+
+    @field_validator("llm_provider")
+    @classmethod
+    def _provider(cls, v: str) -> str:
+        if v not in {"nvidia", "openrouter", "openai_compat", "anthropic"}:
+            raise ValueError("LLM_PROVIDER must be nvidia, openrouter, openai_compat or anthropic")
+        return v
 
     @field_validator("effort")
     @classmethod

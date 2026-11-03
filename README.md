@@ -1,13 +1,13 @@
 # Digi Assist
 
-A personal lifestyle assistant you talk to on Telegram. One Claude agent, a set of skills it loads per task, persistent memory, and an approval gate in front of anything that cannot be undone.
+A personal lifestyle assistant you talk to on Telegram. One agent, a set of skills it loads per task, persistent memory, and an approval gate in front of anything that cannot be undone. Runs on NVIDIA's free hosted Nemotron by default; any OpenAI-compatible endpoint or Claude works with one env var.
 
 Phase 1 (this version): Telegram chat, memory, Gmail, Google Calendar, reminders, a 5 am morning brief.
 
 ## How it works
 
 ```
-Telegram ──> app/integrations/telegram.py ──> app/agent/loop.py ──> Claude (Messages API, tool use)
+Telegram ──> app/integrations/telegram.py ──> app/agent/loop.py ──> app/llm/ (Nemotron / OpenRouter / Claude)
                                                    │
                      ┌─────────────────────────────┼──────────────────────────┐
                      ▼                             ▼                          ▼
@@ -16,7 +16,8 @@ Telegram ──> app/integrations/telegram.py ──> app/agent/loop.py ──> 
 ```
 
 - `app/agent/router.py` picks which skills to load for a message. With five or fewer optional skills everything is loaded; past that a small model chooses from the skill descriptions.
-- `app/agent/loop.py` runs the Messages API tool loop. Thinking blocks and tool calls are stored as raw content blocks in Postgres so the conversation round-trips exactly.
+- `app/agent/loop.py` runs the tool loop in one canonical message format; `app/llm/` converts it for the provider. Tool arguments are validated against the schema before any handler runs, because open models mistype them.
+- `app/llm/openai_compat.py` covers NVIDIA NIM, OpenRouter and any OpenAI-style server. `app/llm/anthropic_provider.py` covers Claude (strict tools, prompt caching, server-side fallbacks).
 - A tool marked `requires_approval=True` never runs directly. It is queued, you get a card with Yes/No, and only Yes executes it. Sends, deletes and invites are gated. Reads, drafts, reminders and your own events are not.
 - `app/skills/memory` is always on. Facts, preferences, people and routines are keyed rows; corrections overwrite.
 - `app/scheduler.py` fires the morning brief (`BRIEF_TIME`) and reminders.
@@ -29,7 +30,7 @@ Create `app/skills/<name>/` with `SKILL.md` (instructions the agent reads when t
 
 ### 1. Accounts you need
 
-- An Anthropic API key.
+- A model API key. Default: free NVIDIA key from https://build.nvidia.com/settings/api-keys (no card; roughly 40 requests a minute shared across models). Alternatives: OpenRouter (`LLM_PROVIDER=openrouter`, `MODEL=nvidia/nemotron-3-super-120b-a12b:free`) or Claude (`LLM_PROVIDER=anthropic`, `MODEL=claude-opus-5-5`).
 - A Telegram bot: message `@BotFather`, `/newbot`, copy the token. Then message your bot `/id` once it is running to learn your numeric id (or temporarily run it with `TELEGRAM_OWNER_ID=0`, send `/id`, and set it).
 - Google Cloud project with Gmail API, Calendar API and Tasks API enabled, and an OAuth client of type **Web application** whose redirect URI is `<PUBLIC_BASE_URL>/oauth/google/callback`. While the app is in "Testing" status add your Gmail address as a test user.
 
@@ -63,10 +64,11 @@ Then in Telegram: `/start`, `/connect_google`, open the link, allow, and talk.
 pytest
 ```
 
-The loop, approval gate, persistence and skill discovery are tested against a fake Claude client. Gmail and Calendar calls are thin wrappers over the Google client and are exercised manually.
+The loop, approval gate, argument validation, persistence, skill discovery and the OpenAI-format conversion are tested against a fake provider. Gmail and Calendar calls are thin wrappers over the Google client and are exercised manually.
 
 ## Known limits in Phase 1
 
+- Free Nemotron is good enough for chat and single tool calls. Multi-step tool use is less reliable than Claude; expect occasional wrong arguments (rejected and retried) or a skipped step. The approval gate is enforced in code either way. The 40 requests/min cap is per key and NVIDIA may throttle or retire models without notice.
 - Text only on Telegram. Voice notes are Phase 2.
 - Memory search is keyword match, not semantic. Fine for a few hundred facts; pgvector arrives when that stops being true.
 - Schema is created with `create_all` at startup. Alembic migrations arrive with Phase 2, when the schema starts changing under live data.
