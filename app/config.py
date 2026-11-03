@@ -12,10 +12,12 @@ class Settings(BaseSettings):
     llm_provider: str = "nvidia"
     llm_api_key: str = ""
     llm_base_url: str = ""
-    model: str = "nvidia/nemotron-3-super-120b-a12b"
+    model: str = "nvidia/nemotron-3.5-super-vl-120b-a12b"
     router_model: str = ""  # empty = same as MODEL
     effort: str = "medium"  # anthropic only
     max_tokens: int = 4096
+    # Nemotron 3.x: ask the chat template to reason before answering (better tool use, slower).
+    nemotron_thinking: bool = True
 
     telegram_bot_token: str = ""
     telegram_owner_id: int = 0
