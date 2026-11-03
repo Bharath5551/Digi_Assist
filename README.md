@@ -30,7 +30,7 @@ Create `app/skills/<name>/` with `SKILL.md` (instructions the agent reads when t
 
 ### 1. Accounts you need
 
-- A model API key. Default: free NVIDIA key from https://build.nvidia.com/settings/api-keys (no card; roughly 40 requests a minute shared across models). Alternatives: OpenRouter (`LLM_PROVIDER=openrouter`, `MODEL=nvidia/nemotron-3-super-120b-a12b:free`) or Claude (`LLM_PROVIDER=anthropic`, `MODEL=claude-opus-5-5`).
+- A model API key. Default: free NVIDIA key from https://build.nvidia.com/settings/api-keys (no card; roughly 40 requests a minute shared across models). Alternatives: OpenRouter (`LLM_PROVIDER=openrouter`, `MODEL=nvidia/nemotron-3.5-super-vl-120b-a12b:free`) or Claude (`LLM_PROVIDER=anthropic`, `MODEL=claude-opus-5-5`).
 - A Telegram bot: message `@BotFather`, `/newbot`, copy the token. Then message your bot `/id` once it is running to learn your numeric id (or temporarily run it with `TELEGRAM_OWNER_ID=0`, send `/id`, and set it).
 - Google Cloud project with Gmail API, Calendar API and Tasks API enabled, and an OAuth client of type **Web application** whose redirect URI is `<PUBLIC_BASE_URL>/oauth/google/callback`. While the app is in "Testing" status add your Gmail address as a test user.
 
