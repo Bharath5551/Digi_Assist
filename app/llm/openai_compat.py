@@ -34,10 +34,18 @@ class OpenAICompatProvider(Provider):
         self.client = client or AsyncOpenAI(base_url=base_url, api_key=s.llm_api_key or "missing", timeout=120, max_retries=2)
         self.model = s.model
         self.router_model = s.router_model or s.model
+        # NVIDIA's Nemotron 3.x templates take enable_thinking via chat_template_kwargs.
+        self.extra_body: dict[str, Any] = (
+            {"chat_template_kwargs": {"enable_thinking": True}}
+            if s.llm_provider == "nvidia" and s.nemotron_thinking and "nemotron" in s.model
+            else {}
+        )
 
     async def complete(self, req: Request) -> Completion:
         messages = to_openai_messages(req.system_stable + "\n\n" + req.system_volatile, req.messages)
         kwargs: dict[str, Any] = dict(model=self.model, messages=messages, max_tokens=req.max_tokens)
+        if self.extra_body:
+            kwargs["extra_body"] = self.extra_body
         if req.tools:
             kwargs["tools"] = [to_openai_tool(t) for t in req.tools]
             kwargs["tool_choice"] = "auto"
@@ -47,7 +55,7 @@ class OpenAICompatProvider(Provider):
     async def quick(self, prompt: str, max_tokens: int = 256) -> str:
         resp = await self.client.chat.completions.create(
             model=self.router_model, messages=[{"role": "user", "content": prompt}], max_tokens=max_tokens
-        )
+        )  # no thinking for the router: it only needs a list of names
         return resp.choices[0].message.content or ""
 
 
